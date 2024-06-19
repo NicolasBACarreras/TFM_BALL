@@ -1,40 +1,30 @@
-''''
-
-In this script we generate the clustering of the Dip-C cells, outputing the embedding, cells in each cluster and anndata object. We can specify different parameters such as resolution...
-
-'''
-
-#########################################################################################
-
-# IMPORT PACKAGES
+########################################
 
 import sys
 sys.path.append("../scripts/")
 
-import anndata as ad
-import networkx as nx
-import numpy as np
-import os
 import scanpy as sc
-from collections import defaultdict
-from CUTAG_lib.cutag.utilities.clustering import wanted_leiden
-from filter_scHiC import get_cells, cis_ratio, do_plot
-from matplotlib import pyplot as plt
 from scipy import sparse
-from scipy.stats import spearmanr
-from sklearn.metrics import davies_bouldin_score, calinski_harabasz_score, silhouette_score
+import numpy as np
+from matplotlib import pyplot as plt
+import anndata as ad
+from filter_scHiC import get_cells, cis_ratio, do_plot
+from CUTAG_lib.cutag.utilities.clustering import wanted_leiden
 import warnings
-from hic_functions import process_demux_file_multi, sc_contact_finder
-
 # Disable warnings
 warnings.filterwarnings("ignore")
+import os
+from scipy.stats import spearmanr
+import networkx as nx
+from sklearn.metrics import davies_bouldin_score, calinski_harabasz_score, silhouette_score
 
 
-#########################################################################################
+
+
+##########################################
 
 
 # Extract command line arguments
-
 min_count_per_cell = int(sys.argv[1])
 reso = int(sys.argv[2])
 trans_reso = reso *10
@@ -52,8 +42,7 @@ if mode not in ["raw", "binarize_1", "bias", "diag"]:
     sys.exit(1)
     
 
-""" 
-bias
+""" bias
 raw
 log2(raw)
 sigmoid transformation lambda x: (1/(1+e^{-x}))
@@ -70,7 +59,7 @@ print(f"Normalization mode: {mode}")
 cells = get_cells(demux_file)
 cell_ratio, cell_total, ratio_cut, total_cut, good_cells = cis_ratio( cells, ratio_cut=0.55, total_cut=min_count_per_cell )
 
-#########################################################################################
+#############################################################################################
 
 with open('../data/cell_tags.txt', 'r') as file:
     cell_class_dict = dict(line.strip().split() for line in file)
@@ -84,7 +73,6 @@ diagnose_cells = {key: value for key, value in cell_class_dict.items() if int(va
 ###############################################################################################
 
 # Create cell object with features
-
 print("Getting counts...")
 cells = {}
 fh = open(demux_file)
@@ -135,9 +123,6 @@ for line in fh:
 
 #####################################################################
 
-
-#Apply biases
-
 if mode=="bias":
     print("Applying biases")
     #Establish biases
@@ -185,23 +170,18 @@ if mode == "raw":
     print("Not normalizing data")
 
 
-#######################################################################
 
-# Generate sparse matrix
+#######################################################################
 
 feature_idx = dict((f, i) for i, f in enumerate(all_features))
 X = sparse.lil_matrix((len(cells), len(all_features)), dtype=np.double)
 for i, (c, ff) in enumerate(cells.items()):
     for f, v in ff.items():       
         X[i, feature_idx[f]] = v
-        
-
-#######################################################################
-
-# Normalize by diagonal
 
 if mode == "diag":
-
+  
+    from collections import defaultdict
 
     X_normalized_diag = sparse.lil_matrix((len(cells), len(all_features)), dtype=np.double)
 
@@ -239,12 +219,11 @@ if mode == "diag":
             diagonal_offset = abs(bin2 - bin1)
             
             X_normalized_diag[i_cell, feature_idx[feature]] = value / (chromosome_diagonal_sums[chrom1][diagonal_offset])    
-            
-#######################################################################
 
-# Create Anndata
 
-print("Creating AnnData...")
+# Create original Anndata
+
+print("Creating original AnnData...")
 
 
 if mode == "diag":
@@ -267,8 +246,6 @@ del(adts.var[0])
 
 ########################################################################
 
-########################################################################
-
 del X, fh
 
 for k in ['cis', 'cis 10kb', 'trans', 'cis ratio', 'cis ratio 10kb']:
@@ -288,8 +265,7 @@ adts.obs['sample'] = ''
 
 ##################################################################################
 
-# Get cell classes
-
+# Initialize an empty dictionary
 my_dict = {}
 
 # Open and read the file with two fields
@@ -311,8 +287,6 @@ for cell_name in adts.obs_names:
 adts.obs['group'] = ['relapse' if int(value) < 193 else 'diagnose' for value in adts.obs['sample']]
 
 #####################################################################################
-
-# Filter features and regress out variables
 
 print("Filtering and regressing out...")
 
@@ -340,110 +314,110 @@ for v in range(0, 19):
         pcs_to_remove.append(v+1)
         
 #######################################################################################
-
 variance_explained = adts.uns['pca']['variance_ratio']
 
 adts.obsm['X_pca'] = np.delete(adts.obsm['X_pca'], pcs_to_remove, axis=1)
+print(len(adts.obsm['X_pca']))
 
-#######################################################################################
+def calculate_score(adts, n_neighbors, n_pcs, reso, min_count_per_cell, min_cells_count, mode, only_cis):
+    adts_copy = adts.copy()  # Make a copy to avoid modifying the original object
+    sc.pp.neighbors(adts_copy, n_neighbors=n_neighbors, n_pcs=n_pcs)
+    adts_copy.obsp['connectivities'].data = np.nan_to_num(adts_copy.obsp['connectivities'].data, copy=False)
+    wanted_leiden(adts_copy, 2)
+    sc.tl.umap(adts_copy, min_dist=0.5)
+    connectivities = adts_copy.obsp['connectivities']
 
-#Perform clustering
 
-sc.pp.neighbors(adts, n_neighbors=6, n_pcs=7)
+    #categorical_values = adts_copy.obs['group']
+
+    # Create a graph from the connectivities data
+    G = nx.Graph()
+    num_nodes = connectivities.shape[0]
+    G.add_nodes_from(range(num_nodes))
+
+    # Add edges based on the threshold (e.g., 0.1)
+    threshold = 0.3
+    for i in range(num_nodes):
+        for j in range(i + 1, num_nodes):
+            if connectivities[i, j] > threshold:
+                G.add_edge(i, j)
+
+    # Get assortativity
+
+    cell_types = np.array(adts_copy.obs["group"])
+
+    # Create a dictionary to associate cell types with nodes
+    cell_type_dict = {node: cell_type for node, cell_type in zip(G.nodes(), cell_types)}
+
+    # Set cell type as a node attribute
+    nx.set_node_attributes(G, cell_type_dict, 'cell_type')
+
+    # Calculate assortativity coefficient
+    assortativity_coefficient = nx.attribute_assortativity_coefficient(G, 'cell_type')
+    assortativity_coefficient_string = "{:.3f}".format(assortativity_coefficient)    
+    directory_path=f"results_10k_too_close/clustering_{reso}_{min_count_per_cell}_{min_cells_count}_{mode}_{only_cis}"
+    if not os.path.exists(directory_path):
+        os.makedirs(directory_path)  # Create directory if it doesn't exist
+    #else:
+        #save_path=f"{directory_path}/reso{reso}_tooclose{too_close}_mincells{min_cells_count}_mode{mode}_neigh{n_neighbors}_pcs{n_pcs}_cis{only_cis}umap.png"
+        #plt.savefig(save_path)
+    
+    cluster_assignments = adts_copy.obs['leiden']
+
+    # Compute clustering metrics
+    db = davies_bouldin_score(adts_copy.X, cluster_assignments)
+    db = "{:.3f}".format(db)
+    ch = calinski_harabasz_score(adts_copy.X, cluster_assignments)
+    ch = "{:.3f}".format(ch)
+    sil = silhouette_score(adts_copy.X, cluster_assignments, metric='euclidean')
+    sil = "{:.3f}".format(sil)
+
+    with open(f'{directory_path}/parameteres_asso.txt', 'a') as f:
+        # Redirect stdout to the file
+        sys.stdout = f
+    
+        # Your code here
+        #print(f"Resolution\tMin_Cells_With_Count\tBias\tRemovedPCs\tPCs\tNeighbours\tAssortativity\tDB_score\tCH_score\tSil\tOnly_cis")
+        print(f"{reso}\t{min_count_per_cell}\t{min_cells_count}\t{mode}\t{len(pcs_to_remove)}\t{n_pcs}\t{n_neighbors}\t{assortativity_coefficient_string}\t{db}\t{ch}\t{sil}\t{only_cis}")
+    
+    del G, adts_copy
+    
+    return assortativity_coefficient
+
+#####################################################################################################
+
+print("Maximizing assoratitivity (neighbours and number of PCs to use)...")
+
+# Initialize variables to store the best combination and the maximum score
+best_n_neighbors = None
+best_n_pcs = None
+max_score = float('-inf')
+
+# Define ranges for n_neighbors and n_pcs
+n_neighbors_range = list(range(5,16)) # Adjust as needed
+n_pcs_range = list(range(5, len(variance_explained)-len(pcs_to_remove))) # Adjust as needed
+
+# Iterate over different combinations of n_neighbors and n_pcs
+for n_neighbors in n_neighbors_range:
+    for n_pcs in n_pcs_range:
+        #print(f"Using {n_pcs} PCs")
+        # Calculate score for the current combination
+        assortativity = calculate_score(adts, n_neighbors, n_pcs, reso, min_count_per_cell, min_cells_count, mode, only_cis)
+        # Update best combination and maximum score if needed
+        if assortativity > max_score:
+            best_n_neighbors = n_neighbors
+            best_n_pcs = n_pcs
+            max_score = assortativity
+            #print(f"New max score: {max_score}")
+
+sc.pp.neighbors(adts, n_neighbors=best_n_neighbors, n_pcs=best_n_pcs)
 adts.obsp['connectivities'].data = np.nan_to_num(adts.obsp['connectivities'].data, copy=False)
 wanted_leiden(adts, 2)
 sc.tl.umap(adts, min_dist=0.5, spread=2)
-color_map = {'diagnose': '#5699ffff', 'relapse': '#fa4777ff'}
-sc.pl.umap(adts, color=['group'], size=200, palette=color_map)
-#sc.pl.umap(adts, color=['leiden', 'group'], size=200)
+sc.pl.umap(adts, color=['leiden', 'group'], size=200)
 
-123,125100000,chr5,48800001,59600000
-
-
-sc_contact_finder(adts, "chr1_chr5", cells)
-
-df = adts.obs
-
-# Convert the 'feature_present' column to binary (0 if absent, 1 if present)
-df['feature_present_binary'] = df['chr1_chr5'].apply(lambda x: 1 if x > 0 else 0)
-# Group the DataFrame by the 'group' column
-grouped = df.groupby('group')
-# Calculate the count of unique observations with the feature present in each group
-unique_feature_present_counts = grouped['feature_present_binary'].sum()
-# Calculate the total count of observations in each group
-total_counts = grouped.size()
-# Calculate the percentage of unique observations with the feature present in each group
-feature_present_percentages = (unique_feature_present_counts / total_counts) * 100
-# Create a DataFrame to store the results
-results_df = pd.DataFrame({
-    'group': feature_present_percentages.index,
-    'cell with feat': unique_feature_present_counts,
-    'feat %': feature_present_percentages.values
-})
-
-# Print or return the results
-print(f'Feature chr1_chr5')
-print(results_df)
-
-
-sc.tl.rank_genes_groups(adts, "leiden", method="t-test")
-sc.pl.rank_genes_groups(adts, n_genes=20, save='ranked_genes.png')
-
-
-ranked_genes = adts.uns['rank_genes_groups']
-
-# Extract the names of the groups (clusters)
-groups = ranked_genes['names'].dtype.names
-
-# Print the marker genes for each cluster
-for group in groups:
-    print(f"Cluster {group}:")
-    print(ranked_genes['names'][group])
-    print("\n")
-
-demux_file = "../data/dipc_files/dipc_contacts_overlapping_promoter_regions_with_genes.tsv"
-print(f"NUmber of cluster1 differential features: {len(ranked_genes['names']['1'])}")
-print(f"NUmber of anndata features: {len(adts.var_names)}")
-
-######################################################################################################################################################
-
-print("Saving results...")
-
-if only_cis == "True":
-    umap_path=f"../results/2_clustering_results/clustering_{reso}_{min_count_per_cell}_{min_cells_count}_{mode}_only_cis/umaps/"
-    anndata_path=f"../results/2_clustering_results/clustering_{reso}_{min_count_per_cell}_{min_cells_count}_{mode}_only_cis/anndata/"
-    clusters_path=f"../results/2_clustering_results/clustering_{reso}_{min_count_per_cell}_{min_cells_count}_{mode}_only_cis/cell_cluster_annotation/"
-else:
-    umap_path=f"../results/2_clustering_results/clustering_{reso}_{min_count_per_cell}_{min_cells_count}_{mode}_all/umaps/"
-    anndata_path=f"../results/2_clustering_results/clustering_{reso}_{min_count_per_cell}_{min_cells_count}_{mode}_all/anndata/"
-    clusters_path=f"../results/2_clustering_results/clustering_{reso}_{min_count_per_cell}_{min_cells_count}_{mode}_all/cell_cluster_annotation/"
-
-if not os.path.exists(umap_path):
-        os.makedirs(umap_path)
-        
-if not os.path.exists(anndata_path):
-        os.makedirs(anndata_path)
-        
-if not os.path.exists(clusters_path):
-    os.makedirs(clusters_path)
-
-first_1000_genes_cluster_0 = ranked_genes['names']["0"][:1000]
-
-if only_cis == "True": 
-    save_path=f"{umap_path}/{reso}_{min_count_per_cell}_{min_cells_count}_{mode}_only_cis_umap.png"
-    adts_path=f"{anndata_path}/{reso}_{min_count_per_cell}_{min_cells_count}_{mode}_only_cis_anndata.hdf5"
-    cells_path=f"{clusters_path}/{reso}_{min_count_per_cell}_{min_cells_count}_{mode}_only_cis_cell_clusters.txt"
-    _, _ = process_demux_file_multi(cells, good_cells, reso, too_close, demux_file, use_trans=True, lichic_bins=set(first_1000_genes_cluster_0), threshold_bins = set(first_1000_genes_cluster_0), output_file=f"{clusters_path}/{reso}_{min_count_per_cell}_{min_cells_count}_{mode}_only_cis_marker_genes_contacts_cluster0.txt")
-else:
-    save_path=f"{umap_path}/{reso}_{min_count_per_cell}_{min_cells_count}_{mode}_all_umap.png"
-    adts_path=f"{anndata_path}/{reso}_{min_count_per_cell}_{min_cells_count}_{mode}_all_anndata.hdf5"
-    cells_path=f"{clusters_path}/{reso}_{min_count_per_cell}_{min_cells_count}_{mode}_all_cell_clusters.txt"
-    _, _ = process_demux_file_multi(cells, good_cells, reso, too_close, demux_file, use_trans=True, lichic_bins=set(first_1000_genes_cluster_0), threshold_bins = set(first_1000_genes_cluster_0), output_file=f"{clusters_path}/{reso}_{min_count_per_cell}_{min_cells_count}_{mode}_all_marker_genes_contacts_cluster0.txt")
-
+#print("Saving results...")
+directory_path=f"results_10k_too_close/clustering_{reso}_{min_count_per_cell}_{min_cells_count}_{mode}_{only_cis}"
+save_path=f"{directory_path}/{reso}_{min_count_per_cell}_{min_cells_count}_{mode}_{only_cis}_umap.png"
 
 plt.savefig(save_path)
-adts.write(adts_path)
-adts.obs[['leiden']].to_csv(cells_path)
-
-file_name=f"{reso}_{min_cells_count}_{min_count_per_cell}_leiden.svg"
-sc.pl.umap(adts, color=['leiden'], size=200, save=file_name)

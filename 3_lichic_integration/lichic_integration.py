@@ -680,9 +680,9 @@ plt.savefig(f"{outdir}venn_diagram_per_cluster.png")
 
 print("Saving unique contacts into files...")
 
-_, _, group2_feat_in_cell = dict_to_vector(cells_group2)
+_, _, group2_feat_in_cell = dict_to_vector(cells_group2)    #Binarize the DipC data and obtain feature dictionary
 
-_, _, group1_feat_in_cell = dict_to_vector(cells_group1)
+_, _, group1_feat_in_cell = dict_to_vector(cells_group1)    #Binarize the DipC data and obtain feature dictionary
 
 
 count_bins_group2 = {k: v for k, v in group2_feat_in_cell.items() if v >= 3}
@@ -691,6 +691,8 @@ threshold_bins_group2 = set(count_bins_group2.keys())
 count_bins_group1 = {k: v for k, v in group1_feat_in_cell.items() if v >= 3}
 threshold_bins_group1 = set(count_bins_group1.keys())
 
+
+#Here change the group2_features and grouop1_features to include features that are exclusive to each condition. Here we are juist using the whol set of features found in each condition
 
 cells_relapse, relapse_features = process_demux_file_multi(cells_group2, good_cells, reso, too_close, demux_file, use_trans=True, lichic_bins = group2_features, threshold_bins = threshold_bins_group2, output_file="../6_gsea/group2_exclusive_features.txt")
 cells_relapse, relapse_features = process_demux_file_multi(cells_group1, good_cells, reso, too_close, demux_file, use_trans=True, lichic_bins = group1_features, threshold_bins = threshold_bins_group1, output_file="../6_gsea/group1_exclusive_features.txt")
@@ -897,7 +899,7 @@ plt.clf()
 
 ####################3
 
-# Per cell type analysis
+""" # Per cell type analysis
 
 
 cluster_correlations = {}
@@ -928,4 +930,4 @@ df = pd.DataFrame({'group1': group1_correlations, 'group2': group2_correlations}
 
 # plot
 ax = df.plot(kind='bar', figsize=(6, 4), rot=0, title='Case Comparison', ylabel='Values')
-plt.savefig(f'{outdir}/correlation_cell_types_histogram.png')
+plt.savefig(f'{outdir}/correlation_cell_types_histogram.png') """
