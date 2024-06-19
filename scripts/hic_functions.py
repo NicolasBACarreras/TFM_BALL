@@ -10,6 +10,7 @@ from scipy import sparse
 import numpy as np
 import anndata as ad
 from matplotlib import pyplot as plt
+import pandas as pd
 
 # FUNCTIONS #################################################################################################
 
@@ -491,6 +492,483 @@ def hic_zoom(cell_dict, good_cells, demux_file, reso, plot_reso, too_close, bias
     
     ratio = trans_reso // reso  
     matrix = np.zeros((genome_size,genome_size))
+    #matrix = np.zeros((chromosomes[chr1], chromosomes[chr2]))
+
+
+    for n,a  in enumerate(adts_next.var_names):
+        p1, p2 = a.split("_")
+        #print(p1,p2)
+        p1_c, p1_b = p1.split(":")
+        p2_c, p2_b = p2.split(":")
+
+        if p1_c == p2_c:
+
+            p1 = coord_to_bin[p1_c, int(p1_b)]
+            p2 = coord_to_bin[p2_c, int(p2_b)]
+
+            matrix[p1, p2] = vals[n]
+            matrix[p2, p1] = vals[n]
+
+        else:
+
+
+            new_b1 = (int(p1_b))*ratio
+            new_b2 = (int(p2_b))*ratio
+
+            for i in range(ratio):
+
+                for j in range(ratio):
+
+                    try: 
+                    
+                        matrix[coord_to_bin[p1_c, new_b1 + i], coord_to_bin[p2_c, new_b2 + j]] = vals[n]
+                        matrix[coord_to_bin[p2_c, new_b2 + i], coord_to_bin[p1_c, new_b1 + j]] = vals[n]
+                    
+                    except KeyError: 
+                    
+                        continue
+                    
+    plt.figure(figsize=(14, 13))
+    plt.imshow(matrix, vmax=5)
+    plt.colorbar()
+    
+    translocation_file_pd.loc[translocation_file_pd['translocation'] == translocation]
+     
+    try:
+        x_coord1 = coord_to_bin[chr1, int(translocation_file_pd.loc[translocation_file_pd['translocation'] == translocation]["start1"]-5000000) // reso]
+        
+    except KeyError:
+        x_coord1 = coord_to_bin[chr1, int(translocation_file_pd.loc[translocation_file_pd['translocation'] == translocation]["start1"]) // reso]
+    
+    plt.axvline(x_coord1, color="red")
+    
+    try:
+        x_coord2 = coord_to_bin[chr1, int(translocation_file_pd.loc[translocation_file_pd['translocation'] == translocation]["end1"]+5000000) // reso]
+    except KeyError:
+        x_coord2 = coord_to_bin[chr1, int(translocation_file_pd.loc[translocation_file_pd['translocation'] == translocation]["end1"]) // reso]
+        
+    plt.axvline(x_coord2, color="red")
+        
+
+    try:
+        y_coord1 = coord_to_bin[chr2, int(translocation_file_pd.loc[translocation_file_pd['translocation'] == translocation]["start2"]-5000000) // reso]
+    except KeyError:
+        y_coord1 = coord_to_bin[chr2, int(translocation_file_pd.loc[translocation_file_pd['translocation'] == translocation]["start2"]) // reso]
+        
+    plt.axhline(y_coord1, color="red")
+    
+    try:
+        y_coord2 = coord_to_bin[chr2, int(translocation_file_pd.loc[translocation_file_pd['translocation'] == translocation]["end2"]+5000000) // reso]
+    except KeyError:
+        y_coord2 = coord_to_bin[chr2, int(translocation_file_pd.loc[translocation_file_pd['translocation'] == translocation]["end2"]) // reso]
+    plt.axhline(y_coord2, color="red")
+        
+
+ 
+    # Set the tick positions and labels
+    plt.xticks([i for i in chromosome_position.values()], [i for i in chromosome_position.keys()], rotation=45)
+    plt.yticks([i for i in chromosome_position.values()], [i for i in chromosome_position.keys()], rotation=45)
+
+    plt.grid()
+    
+    plt.savefig(f"{outdir}/{translocation}_hic_map.png")
+    plt.clf()
+    
+    return cells2, matrix, chromosome_position
+
+#################################################################################################################
+
+def hic_zoom_fusion(cell_dict, good_cells, demux_file, reso, plot_reso, too_close, biases_cis, biases_trans, fusion_protein_file_pd, fusion_protein, chr1, chr2, outdir):
+    
+    if fusion_protein not in set(fusion_protein_file_pd['fusion_protein']):
+        print("Please provide a valid translocation")
+        return
+    
+    trans_reso = reso
+    chr1=f"chr{chr1}"
+    chr2=f"chr{chr2}"
+    
+    chr_list=[chr1, chr2]
+       
+    cells = {}
+    fh = open(demux_file)
+    all_features = set()
+    cchar = 0
+    for line in fh:
+        if line.startswith('#'):
+            cchar += len(line)
+            continue
+        break
+    fh.seek(cchar)
+
+    for line in fh:
+        if line.startswith('bait_chr'):
+            continue
+
+        _, c1, b1, s1, l1, _, _, c2, b2, s2, l2, _, _, ct = line.split()
+        #c1, bait_start, bait_end, _, c2, other_start, other_end, _, _, _ = line.strip().split('\t')
+
+        if ct not in good_cells:
+            continue
+        if ct not in cell_dict.keys():
+            continue
+        
+        b1, l1, b2, l2 = map(int, [b1, l1, b2, l2])
+        # define exact position
+        p1 = b1 + l1 / 2
+        #print(p1)
+        #print(p2)
+        p2 = b2 + l2 / 2
+    
+        if c1 not in chr_list or c2 not in chr_list:
+            continue
+    
+        if c1 == c2:
+            if abs(int(p1) - int(p2)) < too_close:
+                continue
+            p1 = int(int(p1) // reso)
+            p2 = int(int(p2) // reso)
+        else:
+            p1 = int(int(p1) // trans_reso)
+            p2 = int(int(p2) // trans_reso)
+        
+        feature = f"{c1}:{p1}_{c2}:{p2}"
+    
+        all_features.add(feature)
+        try:
+            cells[ct][feature] += 1
+        except KeyError:
+            try:
+                cells[ct][feature] = 1
+            except KeyError:
+                cells[ct] = {feature: 1}
+
+    ######################################################
+    
+    cells2 = cells
+               
+    for ct, cv in cells.items():
+    
+        for f, v in cv.items():
+            p1, p2 = f.split('_')
+            c1, p1 = p1.split(':')
+            c2, p2 = p2.split(':')
+            if c1 != c2:
+                b1 = biases_trans[c1, int(p1)]
+                b2 = biases_trans[c2, int(p2)]
+            else:
+                b1 = biases_cis[c1, int(p1)]
+                b2 = biases_cis[c2, int(p2)]
+        v = np.log2(v / b1 / b2)
+        cv[f] = 0 if np.isnan(v) else v
+    
+    ######################################################
+
+    feature_idx = dict((f, i) for i, f in enumerate(all_features))
+    X = sparse.lil_matrix((len(cells), len(all_features)), dtype=np.double)
+    for i, (c, ff) in enumerate(cells.items()):
+
+        for f, v in ff.items():
+            X[i, feature_idx[f]] = v
+            
+    ######################################################
+
+
+    adts_next = ad.AnnData(X=X.tocsc(), obs=list(cells.keys()), 
+                  var=np.array(list(feature_idx.keys())), 
+                  dtype=X.dtype)
+
+    adts_next.var_names = np.array(list(feature_idx.keys()))
+    adts_next.obs_names = list(cells.keys())
+    del(adts_next.obs[0])
+    del(adts_next.var[0])
+    #print(adts_next)
+    
+    ########################################################
+    
+    
+    fh = open(demux_file)
+    chrom_sizes = {}
+    for line in fh:
+        if not line.startswith('#'):
+            break
+        *_, c, v = line.split()
+        if c not in chr_list: 
+            continue
+        chrom_sizes[c] = int(v)
+    print(chrom_sizes)
+    ##########################################################
+
+    chromosomes = dict((k, chrom_sizes[k]//reso + 1) for k in chr_list)
+
+    genome_size = sum(chromosomes.values())
+
+    coord_to_bin = {}
+
+    chromosome_position = {}
+
+    total = 0
+
+    for c,v in chromosomes.items():
+        for p in range(0,v):
+            coord_to_bin[c,p] = p + total
+        chromosome_position[c] = total
+        total += v 
+    chromosome_position
+
+    chrom_sizes_ratio = {}
+    for key, value in chrom_sizes.items():
+
+        if key == "chrMT" or key=="chrY":
+            continue
+        chrom_sizes_ratio[key] = value//reso +1
+    chrom_sizes_ratio
+
+
+
+    #######################################################
+
+    vals = adts_next.X.sum(axis=0).tolist()[0]
+    
+    ratio = trans_reso // reso  
+    matrix = np.zeros((genome_size,genome_size))
+    #matrix = np.zeros((chromosomes[chr1], chromosomes[chr2]))
+
+
+    for n,a  in enumerate(adts_next.var_names):
+        p1, p2 = a.split("_")
+        #print(p1,p2)
+        p1_c, p1_b = p1.split(":")
+        p2_c, p2_b = p2.split(":")
+
+        if p1_c == p2_c:
+            #print(p1_c, p2_c)
+            p1 = coord_to_bin[p1_c, int(p1_b)]
+            p2 = coord_to_bin[p2_c, int(p2_b)]
+
+            matrix[p1, p2] = vals[n]
+            matrix[p2, p1] = vals[n]
+
+        else:
+
+
+            new_b1 = (int(p1_b))*ratio
+            new_b2 = (int(p2_b))*ratio
+
+            for i in range(ratio):
+
+                for j in range(ratio):
+
+                    try: 
+                    
+                        matrix[coord_to_bin[p1_c, new_b1 + i], coord_to_bin[p2_c, new_b2 + j]] = vals[n]
+                        matrix[coord_to_bin[p2_c, new_b2 + i], coord_to_bin[p1_c, new_b1 + j]] = vals[n]
+                    
+                    except KeyError: 
+                    
+                        continue
+                    
+    plt.figure(figsize=(14, 13))
+    plt.imshow(matrix, vmax=5)
+    plt.colorbar()
+    
+    fusion_protein_file_pd.loc[fusion_protein_file_pd['fusion_protein'] == fusion_protein]
+     
+
+    try:
+        x_coord1 = coord_to_bin[chr1, int(fusion_protein_file_pd.loc[fusion_protein_file_pd['fusion_protein'] == fusion_protein]["start1"]-5000000) // reso]
+        
+    except KeyError:
+        x_coord1 = coord_to_bin[chr1, int(fusion_protein_file_pd.loc[fusion_protein_file_pd['fusion_protein'] == fusion_protein]["start1"]) // reso]
+    
+    plt.axvline(x_coord1, color="red")
+    
+    try:
+        x_coord2 = coord_to_bin[chr1, int(fusion_protein_file_pd.loc[fusion_protein_file_pd['fusion_protein'] == fusion_protein]["end1"]+5000000) // reso]
+    except KeyError:
+        x_coord2 = coord_to_bin[chr1, int(fusion_protein_file_pd.loc[fusion_protein_file_pd['fusion_protein'] == fusion_protein]["end1"]) // reso]
+        
+    plt.axvline(x_coord2, color="red")
+        
+
+    try:
+        y_coord1 = coord_to_bin[chr2, int(fusion_protein_file_pd.loc[fusion_protein_file_pd['fusion_protein'] == fusion_protein]["start2"]-5000000) // reso]
+    except KeyError:
+        y_coord1 = coord_to_bin[chr2, int(fusion_protein_file_pd.loc[fusion_protein_file_pd['fusion_protein'] == fusion_protein]["start2"]) // reso]
+        
+    plt.axhline(y_coord1, color="red")
+    
+    try:
+        y_coord2 = coord_to_bin[chr2, int(fusion_protein_file_pd.loc[fusion_protein_file_pd['fusion_protein'] == fusion_protein]["end2"]+5000000) // reso]
+    except KeyError:
+        y_coord2 = coord_to_bin[chr2, int(fusion_protein_file_pd.loc[fusion_protein_file_pd['fusion_protein'] == fusion_protein]["end2"]) // reso]
+    plt.axhline(y_coord2, color="red")
+        
+
+ 
+    # Set the tick positions and labels
+    plt.xticks([i for i in chromosome_position.values()], [i for i in chromosome_position.keys()], rotation=45)
+    plt.yticks([i for i in chromosome_position.values()], [i for i in chromosome_position.keys()], rotation=45)
+
+    plt.grid()
+    
+    plt.savefig(f"{outdir}/{fusion_protein}_hic_map.png")
+    
+    return cells2
+#################################################################################################################
+
+def hic_zoom_zoom(cell_dict, good_cells, demux_file, reso, plot_reso, too_close, biases_cis, biases_trans, translocation_file_pd, translocation, outdir, zoom_start1=None, zoom_end1=None, zoom_start2=None, zoom_end2=None, zoom_reso=100000):
+    if translocation not in set(translocation_file_pd['translocation']):
+        print("Please provide a valid translocation")
+        return
+    
+    trans_reso = reso
+    chr1 = f"chr{translocation.split(')')[0].split('(')[1].split(';')[0]}"
+    chr2 = f"chr{translocation.split(')')[0].split('(')[1].split(';')[1]}"
+    chr_list=[chr1, chr2]
+       
+    cells = {}
+    fh = open(demux_file)
+    all_features = set()
+    cchar = 0
+    for line in fh:
+        if line.startswith('#'):
+            cchar += len(line)
+            continue
+        break
+    fh.seek(cchar)
+
+    for line in fh:
+        if line.startswith('bait_chr'):
+            continue
+
+        _, c1, b1, s1, l1, _, _, c2, b2, s2, l2, _, _, ct = line.split()
+        #c1, bait_start, bait_end, _, c2, other_start, other_end, _, _, _ = line.strip().split('\t')
+
+        if ct not in good_cells:
+            continue
+        if ct not in cell_dict.keys():
+            continue
+        
+        b1, l1, b2, l2 = map(int, [b1, l1, b2, l2])
+        # define exact position
+        p1 = b1 + l1 / 2
+        #print(p1)
+        #print(p2)
+        p2 = b2 + l2 / 2
+    
+        if c1 not in chr_list or c2 not in chr_list:
+            continue
+    
+        if c1 == c2:
+            if abs(int(p1) - int(p2)) < too_close:
+                continue
+            p1 = int(int(p1) // reso)
+            p2 = int(int(p2) // reso)
+        else:
+            p1 = int(int(p1) // trans_reso)
+            p2 = int(int(p2) // trans_reso)
+        
+        feature = f"{c1}:{p1}_{c2}:{p2}"
+    
+        all_features.add(feature)
+        try:
+            cells[ct][feature] += 1
+        except KeyError:
+            try:
+                cells[ct][feature] = 1
+            except KeyError:
+                cells[ct] = {feature: 1}
+
+    ######################################################
+    
+    cells2 = cells
+               
+    for ct, cv in cells.items():
+    
+        for f, v in cv.items():
+            p1, p2 = f.split('_')
+            c1, p1 = p1.split(':')
+            c2, p2 = p2.split(':')
+            if c1 != c2:
+                b1 = biases_trans[c1, int(p1)]
+                b2 = biases_trans[c2, int(p2)]
+            else:
+                b1 = biases_cis[c1, int(p1)]
+                b2 = biases_cis[c2, int(p2)]
+        v = np.log2(v / b1 / b2)
+        cv[f] = 0 if np.isnan(v) else v
+    
+    ######################################################
+
+    feature_idx = dict((f, i) for i, f in enumerate(all_features))
+    X = sparse.lil_matrix((len(cells), len(all_features)), dtype=np.double)
+    for i, (c, ff) in enumerate(cells.items()):
+
+        for f, v in ff.items():
+            X[i, feature_idx[f]] = v
+            
+    ######################################################
+
+
+    adts_next = ad.AnnData(X=X.tocsc(), obs=list(cells.keys()), 
+                  var=np.array(list(feature_idx.keys())), 
+                  dtype=X.dtype)
+
+    adts_next.var_names = np.array(list(feature_idx.keys()))
+    adts_next.obs_names = list(cells.keys())
+    del(adts_next.obs[0])
+    del(adts_next.var[0])
+    #print(adts_next)
+    
+    ########################################################
+    
+    
+    fh = open(demux_file)
+    chrom_sizes = {}
+    for line in fh:
+        if not line.startswith('#'):
+            break
+        *_, c, v = line.split()
+        if c not in chr_list: 
+            continue
+        chrom_sizes[c] = int(v)
+        
+    ##########################################################
+
+    chromosomes = dict((k, chrom_sizes[k]//reso + 1) for k in chr_list)
+
+    genome_size = sum(chromosomes.values())
+
+    coord_to_bin = {}
+
+    chromosome_position = {}
+
+    total = 0
+
+    for c,v in chromosomes.items():
+        for p in range(0,v):
+            coord_to_bin[c,p] = p + total
+        chromosome_position[c] = total
+        total += v 
+    chromosome_position
+
+    chrom_sizes_ratio = {}
+    for key, value in chrom_sizes.items():
+
+        if key == "chrMT" or key=="chrY":
+            continue
+        chrom_sizes_ratio[key] = value//reso +1
+    chrom_sizes_ratio
+
+
+
+    #######################################################
+
+    vals = adts_next.X.sum(axis=0).tolist()[0]
+    
+    ratio = trans_reso // reso  
+    matrix = np.zeros((genome_size,genome_size))
 
     for n,a  in enumerate(adts_next.var_names):
         p1, p2 = a.split("_")
@@ -532,16 +1010,16 @@ def hic_zoom(cell_dict, good_cells, demux_file, reso, plot_reso, too_close, bias
     translocation_file_pd.loc[translocation_file_pd['translocation'] == translocation]
      
 
-    x_coord1 = coord_to_bin[chr1, int(translocation_file_pd.loc[translocation_file_pd['translocation'] == translocation]["start1"]) // reso]
+    x_coord1 = coord_to_bin[chr1, int(translocation_file_pd.loc[translocation_file_pd['translocation'] == translocation]["start1"]-5000000) // reso]
     plt.axvline(x_coord1, color="red")
-    x_coord2 = coord_to_bin[chr1, int(translocation_file_pd.loc[translocation_file_pd['translocation'] == translocation]["end1"]) // reso]
+    x_coord2 = coord_to_bin[chr1, int(translocation_file_pd.loc[translocation_file_pd['translocation'] == translocation]["end1"]+5000000) // reso]
     plt.axvline(x_coord2, color="red")
         
 
         
-    y_coord1 = coord_to_bin[chr2, int(translocation_file_pd.loc[translocation_file_pd['translocation'] == translocation]["start2"]) // reso]
+    y_coord1 = coord_to_bin[chr2, int(translocation_file_pd.loc[translocation_file_pd['translocation'] == translocation]["start2"]-5000000) // reso]
     plt.axhline(y_coord1, color="red")
-    y_coord2 = coord_to_bin[chr2, int(translocation_file_pd.loc[translocation_file_pd['translocation'] == translocation]["end2"]) // reso]
+    y_coord2 = coord_to_bin[chr2, int(translocation_file_pd.loc[translocation_file_pd['translocation'] == translocation]["end2"]+5000000) // reso]
     plt.axhline(y_coord2, color="red")
         
 
@@ -554,13 +1032,41 @@ def hic_zoom(cell_dict, good_cells, demux_file, reso, plot_reso, too_close, bias
     
     plt.savefig(f"{outdir}/{translocation}_hic_map.png")
     
+    
+    chromosomes = dict((k, chrom_sizes[k]//zoom_reso + 1) for k in chr_list)
+    genome_size = sum(chromosomes.values())
+
+    coord_to_bin = {}
+    chromosome_position = {}
+    total = 0
+
+    for c, v in chromosomes.items():
+        for p in range(0, v):
+            coord_to_bin[c, p] = p + total
+        chromosome_position[c] = total
+        total += v 
+        
+    if zoom_start1 and zoom_end1 and zoom_start2 and zoom_end2:
+        print("Zooming...")
+        zoom_matrix = matrix[
+            coord_to_bin[chr1, zoom_start1 // zoom_reso]:coord_to_bin[chr1, zoom_end1 // zoom_reso],
+            coord_to_bin[chr2, zoom_start2 // zoom_reso]:coord_to_bin[chr2, zoom_end2 // zoom_reso]
+        ]
+
+        plt.figure(figsize=(10, 9))
+        plt.imshow(zoom_matrix)
+        plt.colorbar()
+
+        plt.savefig(f"{outdir}/{translocation}_hic_map_zoomed.png")
+
     return cells2
 
 
 ##################################################################################################################
 
 
-def translocation_contact_finder(adts_object, tchr1, tpos1_start, tpos1_end, tchr2, tpos2_start, tpos2_end, translocation, trans_reso, cells):
+def translocation_contact_finder(adts_object, tchr1, tpos1_start, tpos1_end, tchr2, tpos2_start, tpos2_end, trans_reso, cells):
+    
     """
     Populate a new observation column with contact counts for the specified contact pair.
 
@@ -572,7 +1078,10 @@ def translocation_contact_finder(adts_object, tchr1, tpos1_start, tpos1_end, tch
     """
 
     # Initialize a new observation column for the specified contact pair
-    adts_object.obs[translocation] = 0
+    
+    if "BALL_translocations" not in adts_object.obs.columns:
+        
+        adts_object.obs["BALL_translocations"] = 0
     
     tpos1_start = tpos1_start // trans_reso
     tpos1_end = tpos1_end // trans_reso
@@ -598,12 +1107,78 @@ def translocation_contact_finder(adts_object, tchr1, tpos1_start, tpos1_end, tch
                 if chr1 != tchr1 or chr2 != tchr2:
                     continue
                 else:
+                    #print(feature)
                     if int(bin1) < tpos1_end and int(bin1) > tpos1_start and int(bin2) < tpos2_end and int(bin2) > tpos2_start:
-                        adts_object.obs.loc[cell, translocation] += value
-                        print(feature, value)
+                        #print(tchr1, tchr2)
+                        adts_object.obs.loc[cell, "BALL_translocations"] += value
+                        #print(tchr1, tchr2)
+
 
                         
-                    
-        adts_object.obs.loc[cell, translocation] = adts_object.obs.loc[cell, translocation] / adts_object.obs.loc[cell, "trans"]
+    df = adts_object.obs        
+    #adts_object.obs.loc[cell, "BALL_translocations"] = adts_object.obs.loc[cell, "BALL_translocations"] / adts_object.obs.loc[cell, "trans"]
+    
+
+        
+
+    #print(df['BALL_translocations'])
+    df['feature_present_binary'] = df['BALL_translocations'].apply(lambda x: 1 if x > 10 else 0)
+
+    grouped = df.groupby('leiden')
+
+    unique_feature_present_counts = grouped['feature_present_binary'].sum()
+
+    total_counts = grouped.size()
+
+    feature_present_percentages = (unique_feature_present_counts / total_counts) * 100
+
+    results_df = pd.DataFrame({
+            'group': feature_present_percentages.index,
+            'cell with feat': unique_feature_present_counts,
+            'feat %': feature_present_percentages.values
+    })
+
+
+    print(results_df)
+        
+        
     #print(adts_object.obs[translocation])
+    return adts_object
+
+####################################################################################################
+
+def sc_contact_finder(adts_object, contact, cells):
+    """
+    Populate a new observation column with contact counts for the specified contact pair.
+
+    Contact must be a string like chr4_chr17, numerically ordered (X < Y < MT)
+    
+    Values are in theory raw values
+    """
+
+    # Initialize a new observation column for the specified contact pair
+    adts_object.obs[contact] = 0
+    
+    # Iterate over cells and update contact counts
+    for cell, features in cells.items():
+        if cell not in adts_object.obs_names:
+            continue
+        for feature, value in features.items():
+            if value < 2:
+                continue
+            else:
+                chrom1, chrom2 = feature.split('_')[0].split(':')[0], feature.split('_')[1].split(':')[0]
+                
+                if '_' in contact: #Double contact scenario:
+                    obs_contact = f"{chrom1}_{chrom2}"
+                    if obs_contact == contact:
+                        adts_object.obs.loc[cell, contact] += value
+                        
+                else: #Single contact scenario
+                    
+                    if chrom1 == contact or chrom2 == contact:
+                        adts_object.obs.loc[cell, contact] += value
+                        
+                    
+        adts_object.obs.loc[cell, contact] = adts_object.obs.loc[cell, contact]
     return adts_object
