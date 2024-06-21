@@ -53,8 +53,11 @@ if use_demux:
     
     demux_file=sys.argv[1]
     min_count_cell=int(sys.argv[2])
+    #min_count_cell=5000
     reso = int(sys.argv[3])  
+    #reso = 100000  
     too_close = int(sys.argv[4])     
+    #too_close = 10000    
 
     outdir=f"../results/3_lichic_integration/{min_count_cell}_{reso}_{too_close}_outdir/"
     
@@ -87,10 +90,11 @@ if use_demux:
 
 # Load liCHi-C data
 lichic_file="/home/bsc/bsc059153/PROJECTS/BALL/TFM/data/lichic_files/BALL_relapse_2_cutoff_5.csv"
-lichic_relapse = process_lichic_file(lichic_file, reso, too_close)
+lichic_relapse = process_lichic_file(lichic_file, too_close, reso)
 red_lines = []
 #Filter lichic contacts 
 
+#print(lichic_relapse.keys())
 #lichic_relapse = {k: v for (k, v) in lichic_relapse.items() if int(v) > 2 }
 
 #######################################################################################
