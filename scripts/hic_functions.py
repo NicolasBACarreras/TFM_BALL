@@ -1065,7 +1065,7 @@ def hic_zoom_zoom(cell_dict, good_cells, demux_file, reso, plot_reso, too_close,
 ##################################################################################################################
 
 
-def translocation_contact_finder(adts_object, tchr1, tpos1_start, tpos1_end, tchr2, tpos2_start, tpos2_end, trans_reso, cells):
+def translocation_contact_finder(adts_object, tchr1, tpos1_start, tpos1_end, tchr2, tpos2_start, tpos2_end, trans_reso, cells, translocation):
     
     """
     Populate a new observation column with contact counts for the specified contact pair.
@@ -1079,9 +1079,9 @@ def translocation_contact_finder(adts_object, tchr1, tpos1_start, tpos1_end, tch
 
     # Initialize a new observation column for the specified contact pair
     
-    if "BALL_translocations" not in adts_object.obs.columns:
+    if translocation not in adts_object.obs.columns:
         
-        adts_object.obs["BALL_translocations"] = 0
+        adts_object.obs[translocation] = 0
     
     tpos1_start = tpos1_start // trans_reso
     tpos1_end = tpos1_end // trans_reso
@@ -1110,7 +1110,7 @@ def translocation_contact_finder(adts_object, tchr1, tpos1_start, tpos1_end, tch
                     #print(feature)
                     if int(bin1) < tpos1_end and int(bin1) > tpos1_start and int(bin2) < tpos2_end and int(bin2) > tpos2_start:
                         #print(tchr1, tchr2)
-                        adts_object.obs.loc[cell, "BALL_translocations"] += value
+                        adts_object.obs.loc[cell, translocation] += value
                         #print(tchr1, tchr2)
 
 
@@ -1122,7 +1122,7 @@ def translocation_contact_finder(adts_object, tchr1, tpos1_start, tpos1_end, tch
         
 
     #print(df['BALL_translocations'])
-    df['feature_present_binary'] = df['BALL_translocations'].apply(lambda x: 1 if x > 10 else 0)
+    df['feature_present_binary'] = df[translocation].apply(lambda x: 1 if x > 2 else 0)
 
     grouped = df.groupby('leiden')
 

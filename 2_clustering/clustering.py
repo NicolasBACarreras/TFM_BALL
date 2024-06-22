@@ -310,6 +310,7 @@ for cell_name in adts.obs_names:
 
 adts.obs['group'] = ['relapse' if int(value) < 193 else 'diagnose' for value in adts.obs['sample']]
 
+
 #####################################################################################
 
 # Filter features and regress out variables
@@ -323,6 +324,8 @@ if only_cis == "True":
 else:
     sc.pp.regress_out(adts, keys=['trans'])
 sc.tl.pca(adts, n_comps=20)
+sc.pl.pca_variance_ratio(adts, n_pcs=20, save=f"{reso}_{min_count_per_cell}_{min_cells_count}_{mode}_only_cis.svg")
+
 
 ######################################################################################
 
@@ -356,8 +359,6 @@ sc.tl.umap(adts, min_dist=0.5, spread=2)
 color_map = {'diagnose': '#5699ffff', 'relapse': '#fa4777ff'}
 sc.pl.umap(adts, color=['group'], size=200, palette=color_map)
 #sc.pl.umap(adts, color=['leiden', 'group'], size=200)
-
-123,125100000,chr5,48800001,59600000
 
 
 sc_contact_finder(adts, "chr1_chr5", cells)
@@ -447,3 +448,42 @@ adts.obs[['leiden']].to_csv(cells_path)
 
 file_name=f"{reso}_{min_cells_count}_{min_count_per_cell}_leiden.svg"
 sc.pl.umap(adts, color=['leiden'], size=200, save=file_name)
+
+sc.pl.umap(adts, color=['total'], size=200, save=file_name)
+
+adts_copy = adts.copy()  # Make a copy to avoid modifying the original object
+sc.pp.neighbors(adts_copy, n_neighbors=6, n_pcs=7)
+adts_copy.obsp['connectivities'].data = np.nan_to_num(adts_copy.obsp['connectivities'].data, copy=False)
+wanted_leiden(adts_copy, 2)
+sc.tl.umap(adts_copy, min_dist=0.5)
+connectivities = adts_copy.obsp['connectivities']
+
+
+#categorical_values = adts_copy.obs['group']
+
+# Create a graph from the connectivities data
+G = nx.Graph()
+num_nodes = connectivities.shape[0]
+G.add_nodes_from(range(num_nodes))
+
+# Add edges based on the threshold (e.g., 0.1)
+threshold = 0.3
+for i in range(num_nodes):
+        for j in range(i + 1, num_nodes):
+            if connectivities[i, j] > threshold:
+                G.add_edge(i, j)
+
+# Get assortativity
+
+cell_types = np.array(adts_copy.obs["group"])
+
+# Create a dictionary to associate cell types with nodes
+cell_type_dict = {node: cell_type for node, cell_type in zip(G.nodes(), cell_types)}
+
+# Set cell type as a node attribute
+nx.set_node_attributes(G, cell_type_dict, 'cell_type')
+
+# Calculate assortativity coefficient
+assortativity_coefficient = nx.attribute_assortativity_coefficient(G, 'cell_type')
+
+print(assortativity_coefficient)
